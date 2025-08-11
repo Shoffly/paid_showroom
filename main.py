@@ -272,7 +272,7 @@ def main():
                 )
 
                 # Submitter selection
-                submitter_options = ["Nawal Mostafa", "Mai Yousif", "Mamdouh", "test"]
+                submitter_options = ["Nawal", "Mostafa", "Mai", "Yousif", "Mamdouh", "test"]
                 submitted_by = st.selectbox(
                     "المرسل",
                     options=submitter_options
