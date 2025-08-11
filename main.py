@@ -163,10 +163,10 @@ def submit_payment_data(payment_data):
         query = """
         INSERT INTO `pricing-338819.wholesale_test.paid_showroom`
         (id, c_name, d_code, payment_date, payment_amount, date_of_payment, 
-         sold_date, returned, return_date, request_id)
+         sold_date, returned, return_date, request_id, submitted_by)
         VALUES
         (@id, @c_name, @d_code, @payment_date, @payment_amount, @date_of_payment,
-         @sold_date, @returned, @return_date, @request_id)
+         @sold_date, @returned, @return_date, @request_id, @submitted_by)
         """
 
         # Configure query parameters
@@ -181,7 +181,8 @@ def submit_payment_data(payment_data):
                 bigquery.ScalarQueryParameter("sold_date", "DATE", payment_data['sold_date']),
                 bigquery.ScalarQueryParameter("returned", "BOOL", payment_data['returned']),
                 bigquery.ScalarQueryParameter("return_date", "DATE", payment_data['return_date']),
-                bigquery.ScalarQueryParameter("request_id", "STRING", payment_data['request_id'])
+                bigquery.ScalarQueryParameter("request_id", "STRING", payment_data['request_id']),
+                bigquery.ScalarQueryParameter("submitted_by", "STRING", payment_data['submitted_by'])
             ]
         )
 
@@ -270,6 +271,13 @@ def main():
                     value=datetime.now().date()
                 )
 
+                # Submitter selection
+                submitter_options = ["Nawal Mostafa", "Mai Yousif", "Mamdouh", "test"]
+                submitted_by = st.selectbox(
+                    "المرسل",
+                    options=submitter_options
+                )
+
             # Submit button
             submit_button = st.form_submit_button("إرسال بيانات الدفع", use_container_width=True)
 
@@ -290,7 +298,8 @@ def main():
                     'sold_date': None,  # Left blank as requested
                     'returned': None,  # Left blank as requested
                     'return_date': None,  # Left blank as requested
-                    'request_id': None  # Left blank as requested
+                    'request_id': None,  # Left blank as requested
+                    'submitted_by': submitted_by
                 }
 
                 # Submit payment data
@@ -310,6 +319,7 @@ def main():
                             "payment_date": str(payment_data['payment_date']),
                             "payment_amount": float(payment_data['payment_amount']),
                             "date_of_payment": str(payment_data['date_of_payment']),
+                            "submitted_by": payment_data['submitted_by'],
                             "communication_type": "paid"
                         }
 
@@ -325,7 +335,8 @@ def main():
                             "اسم العميل": payment_data['c_name'],
                             "كود التاجر": payment_data['d_code'],
                             "مبلغ الدفع": float(payment_data['payment_amount']),
-                            "تاريخ الدفع": str(payment_data['date_of_payment'])
+                            "تاريخ الدفع": str(payment_data['date_of_payment']),
+                            "المرسل": payment_data['submitted_by']
                         })
                 else:
                     st.error(message)
@@ -345,7 +356,8 @@ def main():
             sold_date,
             returned,
             return_date,
-            request_id
+            request_id,
+            submitted_by
         FROM `pricing-338819.wholesale_test.paid_showroom`
         WHERE sold_date IS NULL AND return_date IS NULL
         ORDER BY payment_date DESC
@@ -396,6 +408,7 @@ def main():
                                 st.write(f"**كود التاجر:** {car['d_code']}")
                                 st.write(f"**تاريخ الدفع:** {car['payment_date']}")
                                 st.write(f"**مبلغ الدفع:** EGP {car['payment_amount']:,.0f}")
+                                st.write(f"**المرسل:** {car.get('submitted_by', 'غير محدد')}")
 
                             with col2:
                                 if st.button("✅ تم البيع", key=f"sold_{car['id']}"):
@@ -486,6 +499,7 @@ def main():
                     payment_amount,
                     sold_date,
                     return_date,
+                    submitted_by,
                     CASE 
                         WHEN sold_date IS NOT NULL THEN 'مباع'
                         WHEN return_date IS NOT NULL THEN 'مرتجع'
@@ -523,6 +537,7 @@ def main():
                             "payment_amount": "المبلغ",
                             "sold_date": "تاريخ البيع",
                             "return_date": "تاريخ الإرجاع",
+                            "submitted_by": "المرسل",
                             "status": "الحالة"
                         },
                         use_container_width=True
