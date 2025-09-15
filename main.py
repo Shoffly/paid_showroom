@@ -59,6 +59,91 @@ def load_dealers():
         return [], {}
 
 
+# Function to load discount eligible cars from BigQuery
+@st.cache_data(ttl=600)  # Cache data for 10 minutes
+def load_discount_eligible_cars():
+    try:
+        # Get credentials for BigQuery
+        try:
+            credentials = service_account.Credentials.from_service_account_info(
+                st.secrets["service_account"]
+            )
+        except (KeyError, FileNotFoundError):
+            try:
+                credentials = service_account.Credentials.from_service_account_file(
+                    'service_account.json'
+                )
+            except FileNotFoundError:
+                st.error("No credentials found for BigQuery access")
+                return []
+
+        # Create BigQuery client
+        client = bigquery.Client(credentials=credentials)
+
+        # Query to get discount eligible cars
+        query = """
+        SELECT 
+            sf_vehicle_name,
+            showroom_displayed_count,
+            days_in_consignment,
+            queue_count,
+            discount_eligibility_flag,
+            car_status
+        FROM `pricing-338819.wholesale_test.showroom_discount_eligibility`
+        WHERE discount_eligibility_flag = TRUE
+        ORDER BY sf_vehicle_name
+        """
+
+        # Execute query
+        cars_data = client.query(query).to_dataframe()
+        return cars_data.to_dict('records')
+
+    except Exception as e:
+        st.error(f"خطأ في تحميل بيانات السيارات المؤهلة للخصم: {str(e)}")
+        return []
+
+
+# Function to load discount data from BigQuery
+@st.cache_data(ttl=600)  # Cache data for 10 minutes
+def load_discount_data():
+    try:
+        # Get credentials for BigQuery
+        try:
+            credentials = service_account.Credentials.from_service_account_info(
+                st.secrets["service_account"]
+            )
+        except (KeyError, FileNotFoundError):
+            try:
+                credentials = service_account.Credentials.from_service_account_file(
+                    'service_account.json'
+                )
+            except FileNotFoundError:
+                st.error("No credentials found for BigQuery access")
+                return []
+
+        # Create BigQuery client
+        client = bigquery.Client(credentials=credentials)
+
+        # Query to get discount data
+        query = """
+        SELECT 
+            c_code,
+            flash_price,
+            consignment_price,
+            speed_discount_price
+        FROM `pricing-338819.wholesale_test.showroom_discount`
+        ORDER BY c_code
+        """
+
+        # Execute query
+        discount_data = client.query(query).to_dataframe()
+        return discount_data.to_dict('records')
+
+    except Exception as e:
+        st.error(f"خطأ في تحميل بيانات الخصم: {str(e)}")
+        return []
+
+
 # Function to load car names from BigQuery
 @st.cache_data(ttl=600)  # Cache data for 10 minutes
 def load_car_names():
@@ -139,6 +224,52 @@ def load_car_names():
         return []
 
 
+# Function to submit discount data to webhook
+def submit_discount_data(discount_data):
+    try:
+        webhook_url = "https://anasalaa.app.n8n.cloud/webhook/9296d4cc-ca48-4bd6-9635-3ef4029b0fce"
+
+        # Set proper headers for the webhook request
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'User-Agent': 'Streamlit-Showroom-Discount/1.0'
+        }
+
+        # Debug: Log the payload being sent
+        st.write("🔍 Debug Info:")
+        st.write(f"Webhook URL: {webhook_url}")
+        st.write("Payload being sent:")
+        st.json(discount_data)
+
+        response = requests.post(webhook_url, json=discount_data, headers=headers, timeout=10)
+
+        # Debug: Log response details
+        st.write(f"Response Status Code: {response.status_code}")
+        st.write(f"Response Headers: {dict(response.headers)}")
+
+        if response.status_code == 404:
+            return False, f"خطأ 404: الرابط غير موجود. تأكد من أن webhook مُفعل في n8n وأن الرابط صحيح."
+
+        response.raise_for_status()
+
+        # Log successful response
+        st.write("✅ Response received successfully")
+        if response.text:
+            st.write("Response body:", response.text)
+
+        return True, "تم إرسال بيانات الخصم بنجاح!"
+
+    except requests.exceptions.Timeout:
+        return False, "خطأ: انتهت مهلة الاتصال. تحقق من اتصال الإنترنت."
+    except requests.exceptions.ConnectionError:
+        return False, "خطأ: فشل في الاتصال بالخادم. تحقق من الرابط."
+    except requests.exceptions.HTTPError as e:
+        return False, f"خطأ HTTP: {e}. كود الحالة: {e.response.status_code if e.response else 'غير معروف'}"
+    except requests.exceptions.RequestException as e:
+        return False, f"خطأ في إرسال بيانات الخصم: {str(e)}"
+
+
 # Function to submit payment data
 def submit_payment_data(payment_data):
     try:
@@ -204,6 +335,8 @@ def main():
     with st.spinner("جاري تحميل البيانات..."):
         dealers_data, dealers_dict = load_dealers()
         cars_data = load_car_names()
+        discount_eligible_cars = load_discount_eligible_cars()
+        discount_data = load_discount_data()
 
     if not dealers_data:
         st.warning("لا توجد بيانات متاحة للتجار.")
@@ -214,7 +347,7 @@ def main():
         return
 
     # Create tabs for form and management
-    tab1, tab2 = st.tabs(["📝 نموذج الدفع", "📊 إدارة السيارات المدفوعة"])
+    tab1, tab2, tab3 = st.tabs(["📝 نموذج الدفع", "📊 إدارة السيارات المدفوعة", "🏷️ خصم المعرض"])
 
     with tab1:
         # Generate random ID
@@ -272,7 +405,7 @@ def main():
                 )
 
                 # Submitter selection
-                submitter_options = ["Nawal", "Mostafa", "Mai", "Yousif", "Mamdouh", "test"]
+                submitter_options = ["Nawal Mostafa", "Mai Yousif", "Mamdouh", "test"]
                 submitted_by = st.selectbox(
                     "المرسل",
                     options=submitter_options
@@ -455,7 +588,7 @@ def main():
                                         # Send HTTP request to webhook for returned car BEFORE showing success message
                                         webhook_success = False
                                         try:
-                                            webhook_url ="https://anasalaa.app.n8n.cloud/webhook/e4ddbc51-cbb1-4cff-b88a-1062a3ab2cc7"
+                                            webhook_url = "https://anasalaa.app.n8n.cloud/webhook/e4ddbc51-cbb1-4cff-b88a-1062a3ab2cc7"
                                             webhook_payload = {
                                                 "id": str(car['id']),
                                                 "c_name": str(car['c_name']),
@@ -547,6 +680,163 @@ def main():
 
         except Exception as e:
             st.error(f"خطأ في تحميل بيانات المعرض المدفوع: {str(e)}")
+
+    with tab3:
+        st.subheader("🏷️ نموذج خصم المعرض")
+
+        if not discount_eligible_cars:
+            st.warning("لا توجد سيارات مؤهلة للخصم.")
+            return
+
+        if not discount_data:
+            st.warning("لا توجد بيانات خصم متاحة.")
+            return
+
+        # Filter cars to only show those that are both discount eligible AND have discount data
+        eligible_cars_with_discount = [
+            car for car in discount_eligible_cars
+            if any(d['c_code'] == car['sf_vehicle_name'] for d in discount_data)
+        ]
+
+        if not eligible_cars_with_discount:
+            st.warning("لا توجد سيارات مؤهلة للخصم مع بيانات خصم متاحة.")
+            return
+
+        # Car selection dropdown - outside of form to allow dynamic updates
+        st.subheader("اختيار السيارة والتاجر")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # Car selection dropdown - only show cars that are both discount eligible AND have discount data
+            car_options = [
+                (car['sf_vehicle_name'], f"{car['sf_vehicle_name']}  {car['days_in_consignment']} ")
+                for car in eligible_cars_with_discount
+            ]
+            car_codes = [code for code, _ in car_options]
+            car_displays = [display for _, display in car_options]
+
+            selected_car_index = st.selectbox(
+                "اختر السيارة",
+                options=range(len(car_options)),
+                format_func=lambda i: car_displays[i],
+                key="discount_car_select"
+            )
+            selected_car_code = car_codes[selected_car_index]
+            selected_car_info = eligible_cars_with_discount[selected_car_index]
+
+        with col2:
+            # Dealer selection
+            dealer_options = [(dealer['dealer_code'], dealer['dealer_name']) for dealer in dealers_data]
+            dealer_codes = [code for code, _ in dealer_options]
+
+            selected_dealer_index = st.selectbox(
+                "اختر التاجر",
+                options=range(len(dealer_options)),
+                format_func=lambda i: f"{dealer_options[i][0]} - {dealer_options[i][1]}",
+                key="discount_dealer_select"
+            )
+            selected_dealer_code = dealer_codes[selected_dealer_index]
+
+        # Find discount data for selected car
+        car_discount = next((d for d in discount_data if d['c_code'] == selected_car_code), None)
+
+        if car_discount:
+            st.subheader("معلومات الخصم")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric(
+                    "السعر السريع",
+                    f"EGP {car_discount['speed_discount_price']:,.0f}" if car_discount[
+                        'speed_discount_price'] else "غير متاح"
+                )
+
+            with col2:
+                st.metric(
+                    "سعر الاستلام",
+                    f"EGP {car_discount['consignment_price']:,.0f}" if car_discount['consignment_price'] else "غير متاح"
+                )
+
+            with col3:
+                if car_discount['speed_discount_price'] and car_discount['consignment_price']:
+                    discount_amount = car_discount['consignment_price'] - car_discount['speed_discount_price']
+                    st.metric("مبلغ الخصم", f"EGP {discount_amount:,.0f}")
+                else:
+                    st.metric("مبلغ الخصم", "غير متاح")
+
+            with col4:
+                st.metric(
+                    "السعر الفوري",
+                    f"EGP {car_discount['flash_price']:,.0f}" if car_discount['flash_price'] else "غير متاح"
+                )
+
+            # Car details
+            st.subheader("تفاصيل السيارة")
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.info(f"**أيام الاستلام:** {selected_car_info['days_in_consignment']}")
+
+            with col2:
+                st.info(f"**عدد مرات العرض:** {selected_car_info['showroom_displayed_count']}")
+
+            with col3:
+                st.info(f"**عدد الطوابير:** {selected_car_info['queue_count']}")
+
+            # Create form for submission
+            with st.form("discount_form"):
+                st.subheader("تأكيد إرسال بيانات الخصم")
+
+                # Show summary of what will be sent
+                st.info(f"**السيارة المختارة:** {selected_car_code}")
+                st.info(f"**التاجر المختار:** {selected_dealer_code}")
+
+                # Submit button
+                submit_discount = st.form_submit_button("إرسال بيانات الخصم", use_container_width=True)
+
+                if submit_discount:
+                    # Prepare discount payload
+                    discount_payload = {
+                        "c_code": selected_car_code,
+                        "dealer_code": selected_dealer_code,
+                        "flash_price": float(car_discount['flash_price']) if car_discount['flash_price'] else 0.0,
+                        "consignment_price": float(car_discount['consignment_price']) if car_discount[
+                            'consignment_price'] else 0.0,
+                        "speed_discount_price": float(car_discount['speed_discount_price']) if car_discount[
+                            'speed_discount_price'] else 0.0,
+                        "days_in_consignment": selected_car_info['days_in_consignment'],
+                        "showroom_displayed_count": selected_car_info['showroom_displayed_count'],
+                        "queue_count": selected_car_info['queue_count'],
+                        "car_status": selected_car_info['car_status']
+                    }
+
+                    # Submit to webhook
+                    success, message = submit_discount_data(discount_payload)
+
+                    if success:
+                        st.success(message)
+                        st.balloons()
+
+                        # Show submitted data for confirmation
+                        with st.expander("البيانات المرسلة"):
+                            st.json({
+                                "كود السيارة": discount_payload['c_code'],
+                                "كود التاجر": discount_payload['dealer_code'],
+                                "السعر الفوري": discount_payload['flash_price'],
+                                "سعر الاستلام": discount_payload['consignment_price'],
+                                "السعر السريع": discount_payload['speed_discount_price'],
+                                "أيام الاستلام": discount_payload['days_in_consignment'],
+                                "عدد مرات العرض": discount_payload['showroom_displayed_count'],
+                                "عدد الطوابير": discount_payload['queue_count'],
+                                "حالة السيارة": discount_payload['car_status']
+                            })
+                    else:
+                        st.error(message)
+
+        else:
+            st.error(f"لا توجد بيانات خصم للسيارة {selected_car_code}")
 
 
 if __name__ == "__main__":
