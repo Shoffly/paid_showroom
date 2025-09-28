@@ -227,7 +227,7 @@ def load_car_names():
 # Function to submit discount data to webhook
 def submit_discount_data(discount_data):
     try:
-        webhook_url = "https://anasalaa.app.n8n.cloud/webhook/9296d4cc-ca48-4bd6-9635-3ef4029b0fce"
+        webhook_url = "https://anasalaa.app.n8n.cloud/webhook-test/9296d4cc-ca48-4bd6-9635-3ef4029b0fce"
 
         # Set proper headers for the webhook request
         headers = {
